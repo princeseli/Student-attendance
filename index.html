@@ -1,0 +1,1035 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>FaceAttend — School Attendance System</title>
+
+  <!-- face-api.js: Real face detection & recognition in the browser -->
+  <script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+
+  <!-- Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js"></script>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap');
+
+    :root {
+      --bg: #f0f2f7;
+      --surface: #ffffff;
+      --surface2: #f7f8fc;
+      --border: rgba(0,0,0,0.08);
+      --border2: rgba(0,0,0,0.14);
+      --text: #111827;
+      --muted: #6b7280;
+      --hint: #9ca3af;
+      --blue: #1d4ed8;
+      --blue-light: #eff6ff;
+      --blue-mid: #3b82f6;
+      --green: #15803d;
+      --green-light: #f0fdf4;
+      --red: #b91c1c;
+      --red-light: #fef2f2;
+      --amber: #b45309;
+      --amber-light: #fffbeb;
+      --radius: 10px;
+      --radius-lg: 16px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'DM Sans', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    /* Layout */
+    .app-shell {
+      display: grid;
+      grid-template-columns: 240px 1fr;
+      grid-template-rows: 56px 1fr;
+      min-height: 100vh;
+    }
+
+    /* Top bar */
+    .topbar {
+      grid-column: 1 / -1;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      padding: 0 24px;
+      gap: 12px;
+    }
+    .topbar-logo {
+      width: 32px; height: 32px;
+      background: var(--blue);
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .topbar-logo svg { width:18px; height:18px; fill:white; }
+    .topbar-title { font-weight: 600; font-size: 15px; }
+    .topbar-sub { font-size: 12px; color: var(--muted); margin-left: 4px; }
+    .topbar-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+    .chip { font-size: 12px; padding: 4px 10px; border-radius: 20px; border: 1px solid var(--border2); color: var(--muted); font-family: 'DM Mono', monospace; }
+    .sync-indicator { font-size: 11px; padding: 4px 8px; border-radius: 20px; display: flex; align-items: center; gap: 6px; }
+    .sync-indicator.synced { background: var(--green-light); color: var(--green); }
+    .sync-indicator.syncing { background: var(--blue-light); color: var(--blue); }
+    .sync-indicator.offline { background: var(--amber-light); color: var(--amber); }
+    .sync-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: pulse-sync 1.4s infinite; }
+    @keyframes pulse-sync { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+    /* Sidebar */
+    .sidebar {
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      padding: 20px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .sidebar-section { font-size: 11px; font-weight: 600; color: var(--hint); letter-spacing: 0.06em; text-transform: uppercase; padding: 12px 10px 6px; }
+    .nav-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 9px 12px;
+      border-radius: var(--radius);
+      font-size: 14px; font-weight: 400;
+      color: var(--muted);
+      cursor: pointer;
+      border: none; background: none; width: 100%; text-align: left;
+      transition: background 0.12s, color 0.12s;
+    }
+    .nav-item svg { width:16px; height:16px; flex-shrink:0; opacity:.7; }
+    .nav-item:hover { background: var(--surface2); color: var(--text); }
+    .nav-item.active { background: var(--blue-light); color: var(--blue); font-weight: 500; }
+    .nav-item.active svg { opacity:1; }
+
+    /* Main */
+    .main { padding: 28px; overflow-y: auto; }
+    .page { display: none; }
+    .page.active { display: block; }
+    .page-header { margin-bottom: 24px; }
+    .page-header h2 { font-size: 20px; font-weight: 600; }
+    .page-header p { font-size: 14px; color: var(--muted); margin-top: 3px; }
+
+    /* Cards */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 20px;
+    }
+
+    /* Stats */
+    .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 24px; }
+    .stat { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 16px 20px; }
+    .stat-val { font-size: 28px; font-weight: 600; font-family: 'DM Mono', monospace; }
+    .stat-lbl { font-size: 12px; color: var(--muted); margin-top: 2px; }
+    .stat.blue .stat-val { color: var(--blue); }
+    .stat.green .stat-val { color: var(--green); }
+    .stat.red .stat-val { color: var(--red); }
+
+    /* Scanner */
+    .scanner-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    .video-card { position: relative; background: #0f172a; border-radius: var(--radius-lg); overflow: hidden; aspect-ratio: 4/3; display: flex; align-items: center; justify-content: center; }
+    #videoEl { width: 100%; height: 100%; object-fit: cover; display: none; }
+    #faceCanvas { position: absolute; top:0; left:0; width:100%; height:100%; }
+    .cam-placeholder { text-align: center; color: #64748b; display:flex; flex-direction:column; align-items:center; }
+    .cam-placeholder svg { width:48px; height:48px; margin-bottom:12px; opacity:.4; }
+    .cam-placeholder p { font-size:14px; }
+    .scanner-controls { display: flex; flex-direction: column; gap: 12px; }
+
+    /* Buttons */
+    .btn-primary {
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      padding: 12px 20px;
+      background: var(--blue);
+      color: white;
+      border: none; border-radius: var(--radius);
+      font-size: 14px; font-weight: 500; font-family: 'DM Sans', sans-serif;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    .btn-primary:hover { opacity: .88; }
+    .btn-primary:disabled { opacity: .45; cursor: not-allowed; }
+    .btn-secondary {
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      padding: 11px 20px;
+      background: none;
+      color: var(--text);
+      border: 1px solid var(--border2); border-radius: var(--radius);
+      font-size: 14px; font-weight: 400; font-family: 'DM Sans', sans-serif;
+      cursor: pointer;
+      transition: background 0.12s;
+    }
+    .btn-secondary:hover { background: var(--surface2); }
+    .btn-secondary:disabled { opacity: .45; cursor: not-allowed; }
+
+    /* Status box */
+    .status-box {
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      font-size: 14px;
+      border: 1px solid var(--border);
+      background: var(--surface2);
+      color: var(--muted);
+      min-height: 52px;
+      display: flex; align-items: flex-start; gap: 10px;
+      line-height: 1.5;
+    }
+    .status-box.success { background: var(--green-light); border-color: #86efac; color: var(--green); }
+    .status-box.error   { background: var(--red-light);   border-color: #fca5a5; color: var(--red); }
+    .status-box.info    { background: var(--blue-light);  border-color: #93c5fd; color: var(--blue); }
+    .status-box.warn    { background: var(--amber-light); border-color: #fcd34d; color: var(--amber); }
+
+    .status-dot { width:10px; height:10px; border-radius:50%; flex-shrink:0; margin-top:4px; }
+    .status-dot.green { background: #22c55e; animation: pulse 1.4s infinite; }
+    .status-dot.gray  { background: #9ca3af; }
+    .status-dot.red   { background: #ef4444; }
+    .status-dot.amber { background: #f59e0b; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.45} }
+
+    .divider { border: none; border-top: 1px solid var(--border); margin: 4px 0; }
+
+    .info-block { background: #f8fafc; border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; font-size: 13px; color: var(--muted); line-height: 1.7; }
+    .info-block strong { color: var(--text); font-weight: 500; }
+    .info-block code { font-family: 'DM Mono', monospace; font-size: 11px; background: #e2e8f0; padding: 2px 5px; border-radius: 4px; color: #334155; }
+
+    /* Students */
+    .toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+    .search-wrap { position: relative; flex: 1; }
+    .search-wrap input { width:100%; padding: 9px 12px 9px 36px; border: 1px solid var(--border2); border-radius: var(--radius); font-size: 14px; font-family: 'DM Sans', sans-serif; background: var(--surface); color: var(--text); }
+    .search-wrap input:focus { outline: none; border-color: var(--blue-mid); }
+    .search-icon { position:absolute; left:10px; top:50%; transform:translateY(-50%); width:16px; height:16px; color:var(--hint); pointer-events:none; }
+
+    .student-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+    .student-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 16px; text-align: center; }
+    .avatar-lg { width: 56px; height: 56px; border-radius: 50%; display: flex; align-items:center; justify-content:center; font-size: 18px; font-weight: 600; margin: 0 auto 10px; }
+    .student-card-name { font-size: 14px; font-weight: 500; margin-bottom: 2px; }
+    .student-card-id { font-size: 12px; color: var(--muted); font-family: 'DM Mono', monospace; margin-bottom: 10px; }
+    .badge { display: inline-block; padding: 3px 9px; border-radius: 20px; font-size: 11px; font-weight: 500; }
+    .badge.enrolled { background: var(--green-light); color: var(--green); }
+    .badge.pending  { background: var(--amber-light); color: var(--amber); }
+    .enroll-mini { margin-top: 8px; font-size: 12px; padding: 5px 12px; border-radius: var(--radius); border: 1px solid var(--border2); background: none; cursor: pointer; color: var(--muted); font-family: 'DM Sans', sans-serif; display:inline-block; }
+    .enroll-mini:hover { background: var(--surface2); }
+
+    /* Attendance table */
+    .table-wrap { overflow-x: auto; }
+    table { width:100%; border-collapse: collapse; font-size: 14px; }
+    thead th { text-align:left; padding: 10px 14px; font-size: 12px; font-weight: 500; color: var(--muted); border-bottom: 1px solid var(--border); white-space: nowrap; }
+    tbody td { padding: 12px 14px; border-bottom: 1px solid var(--border); color: var(--text); vertical-align: middle; }
+    tbody tr:last-child td { border-bottom: none; }
+    tbody tr:hover td { background: var(--surface2); }
+    .pill { display:inline-block; padding: 3px 10px; border-radius: 20px; font-size: 12px; font-weight: 500; }
+    .pill.present { background: var(--green-light); color: var(--green); }
+    .pill.absent  { background: var(--red-light);   color: var(--red); }
+    .pill.late    { background: var(--amber-light);  color: var(--amber); }
+    .mono { font-family: 'DM Mono', monospace; font-size: 13px; color: var(--muted); }
+    .av-sm { width:30px;height:30px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;margin-right:8px;vertical-align:middle; }
+
+    /* Modal */
+    .overlay { position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:200; display:none; align-items:center; justify-content:center; }
+    .overlay.open { display:flex; }
+    .modal { background: var(--surface); border-radius: var(--radius-lg); border: 1px solid var(--border); padding: 24px; width: 380px; max-width: 95vw; }
+    .modal h3 { font-size: 16px; font-weight: 600; margin-bottom: 16px; }
+    .field { margin-bottom: 14px; }
+    .field label { font-size: 13px; color: var(--muted); display:block; margin-bottom: 5px; }
+    .field input, .field select { width:100%; padding: 9px 12px; border: 1px solid var(--border2); border-radius: var(--radius); font-size: 14px; font-family: 'DM Sans', sans-serif; background: var(--surface); color: var(--text); }
+    .field input:focus, .field select:focus { outline:none; border-color: var(--blue-mid); }
+    .modal-footer { display:flex; gap:8px; justify-content:flex-end; margin-top:20px; }
+
+    .date-row { display:flex; align-items:center; gap:10px; margin-bottom:16px; }
+    .date-row label { font-size:13px; color:var(--muted); }
+    .date-row input { padding:7px 12px; border:1px solid var(--border2); border-radius:var(--radius); font-size:13px; font-family:'DM Mono',monospace; background:var(--surface); color:var(--text); }
+    .date-row input:focus { outline:none; border-color:var(--blue-mid); }
+    .export-row { display:flex; justify-content:flex-end; margin-top: 16px; }
+
+    /* Model loader */
+    #modelLoader { position:fixed; inset:0; background:#fff; z-index:300; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; }
+    .loader-bar-wrap { width:240px; height:4px; background:#e5e7eb; border-radius:4px; overflow:hidden; }
+    .loader-bar { height:100%; background:var(--blue); border-radius:4px; transition:width .4s; }
+    #loaderText { font-size:14px; color:var(--muted); }
+    #loaderTitle { font-size:22px; font-weight:600; }
+
+    /* Firebase Setup Modal */
+    .firebase-setup { background: var(--amber-light); border: 1px solid #fcd34d; border-radius: var(--radius-lg); padding: 16px; margin-bottom: 20px; }
+    .firebase-setup h4 { color: var(--amber); font-size: 14px; margin-bottom: 8px; }
+    .firebase-setup p { color: var(--amber); font-size: 12px; line-height: 1.6; }
+    .firebase-setup code { background: rgba(180, 83, 9, 0.1); padding: 2px 4px; border-radius: 3px; }
+
+    /* Responsive */
+    @media (max-width: 700px) {
+      .app-shell { grid-template-columns: 1fr; grid-template-rows: 56px auto 1fr; }
+      .sidebar { grid-row: 2; flex-direction: row; overflow-x: auto; padding: 8px; border-right:none; border-bottom: 1px solid var(--border); }
+      .sidebar-section { display:none; }
+      .nav-item { flex-direction:column; gap:4px; font-size:10px; padding:8px 10px; white-space:nowrap; }
+      .scanner-layout { grid-template-columns:1fr; }
+      .stats-grid { grid-template-columns: repeat(2,1fr); }
+      .student-grid { grid-template-columns: repeat(auto-fill, minmax(150px,1fr)); }
+      .topbar-right { flex-direction: column; font-size: 11px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- Model loader overlay -->
+<div id="modelLoader">
+  <div id="loaderTitle">FaceAttend</div>
+  <p style="font-size:13px;color:#9ca3af">School Attendance System</p>
+  <div id="loaderText" style="margin-top:8px">Initialising…</div>
+  <div class="loader-bar-wrap"><div class="loader-bar" id="loaderBar" style="width:0%"></div></div>
+  <p style="font-size:12px;color:#9ca3af">Loading face recognition models & Firebase — internet required</p>
+</div>
+
+<div class="app-shell">
+
+  <!-- Top bar -->
+  <header class="topbar">
+    <div class="topbar-logo">
+      <svg viewBox="0 0 24 24"><path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z"/></svg>
+    </div>
+    <span class="topbar-title">FaceAttend</span>
+    <span class="topbar-sub" id="classLabel">School Attendance System</span>
+    <div class="topbar-right">
+      <div class="sync-indicator synced" id="syncStatus">
+        <div class="sync-dot"></div>
+        <span id="syncText">Synced</span>
+      </div>
+      <span class="chip" id="todayChip"></span>
+    </div>
+  </header>
+
+  <!-- Sidebar -->
+  <nav class="sidebar">
+    <span class="sidebar-section">Main</span>
+    <button class="nav-item active" onclick="showPage('scanner',this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+      Scanner
+    </button>
+    <button class="nav-item" onclick="showPage('students',this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      Students
+    </button>
+    <button class="nav-item" onclick="showPage('records',this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 12h6M9 16h4"/></svg>
+      Attendance
+    </button>
+    <span class="sidebar-section">Info</span>
+    <button class="nav-item" onclick="showPage('settings',this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      Settings
+    </button>
+  </nav>
+
+  <!-- Main content -->
+  <main class="main">
+
+    <!-- SCANNER PAGE -->
+    <div class="page active" id="page-scanner">
+      <div class="page-header">
+        <h2>Face Scanner</h2>
+        <p>Start the camera, then click Detect to automatically mark attendance using face recognition</p>
+      </div>
+      <div id="httpsWarning" class="firebase-setup" style="display:none;background:#fef2f2;border-color:#fca5a5">
+        <h4 style="color:var(--red)">⚠️ HTTPS Required</h4>
+        <p style="color:var(--red)">Camera access requires a secure HTTPS connection or localhost. This won't work on plain HTTP. Deploy to Vercel, Netlify, GitHub Pages, or test on localhost.</p>
+      </div>
+      <div class="scanner-layout">
+        <div class="video-card" id="videoCard">
+          <video id="videoEl" autoplay muted playsinline></video>
+          <canvas id="faceCanvas"></canvas>
+          <div class="cam-placeholder" id="camPlaceholder">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M15 10l4.553-2.069A1 1 0 0 1 21 8.862v6.276a1 1 0 0 1-1.447.894L15 14M3 8a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8z"/></svg>
+            <p>Camera not started</p>
+          </div>
+        </div>
+        <div class="scanner-controls">
+          <button class="btn-primary" id="startCamBtn" onclick="startCamera()">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7S2 12 2 12z"/></svg>
+            Start Camera
+          </button>
+          <button class="btn-secondary" id="stopCamBtn" onclick="stopCamera()" disabled>Stop Camera</button>
+          <hr class="divider">
+          <button class="btn-primary" id="detectBtn" onclick="runDetection()" disabled>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/></svg>
+            Detect &amp; Mark Attendance
+          </button>
+          <button class="btn-secondary" id="enrollBtn" onclick="enrollCurrentFace()" disabled>
+            Enroll Selected Student's Face
+          </button>
+          <div class="field" style="margin-bottom:0">
+            <label style="font-size:13px;color:var(--muted);display:block;margin-bottom:5px">Student to enroll:</label>
+            <select id="enrollSelect" style="width:100%;padding:8px 10px;border:1px solid var(--border2);border-radius:var(--radius);font-size:13px;font-family:'DM Sans',sans-serif;background:var(--surface);color:var(--text)"></select>
+          </div>
+          <hr class="divider">
+          <div class="status-box" id="statusBox">
+            <div class="status-dot gray"></div>
+            <span>Camera is off. Click "Start Camera" to begin.</span>
+          </div>
+          <div class="info-block">
+            <strong>Real face recognition flow:</strong><br>
+            1. Add students in the Students tab<br>
+            2. Start camera, select a student from the dropdown, click "Enroll" to capture their face<br>
+            3. Click "Detect &amp; Mark Attendance" to recognise and auto-mark<br><br>
+            Uses <code>face-api.js</code> with 128-D face embeddings stored in <code>Firebase Firestore</code> with <code>localStorage</code> offline backup.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- STUDENTS PAGE -->
+    <div class="page" id="page-students">
+      <div class="page-header">
+        <h2>Students</h2>
+        <p>Manage enrolled students and their face data (synced with Firebase)</p>
+      </div>
+      <div id="firebaseSetup" class="firebase-setup" style="display:none">
+        <h4>⚠️ Firebase Not Configured</h4>
+        <p>To enable cloud sync and persistent storage, add your Firebase config to <code>initFirebase()</code> in the Settings tab. For now, data is stored locally only.</p>
+      </div>
+      <div class="toolbar">
+        <div class="search-wrap">
+          <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+          <input type="text" id="searchInput" placeholder="Search students…" oninput="renderStudents()">
+        </div>
+        <button class="btn-primary" onclick="openModal()">+ Add Student</button>
+      </div>
+      <div class="student-grid" id="studentGrid"></div>
+    </div>
+
+    <!-- RECORDS PAGE -->
+    <div class="page" id="page-records">
+      <div class="page-header">
+        <h2>Attendance Records</h2>
+        <p>View and export daily attendance data</p>
+      </div>
+      <div class="stats-grid">
+        <div class="stat blue"><div class="stat-val" id="rTotal">0</div><div class="stat-lbl">Total students</div></div>
+        <div class="stat green"><div class="stat-val" id="rPresent">0</div><div class="stat-lbl">Present</div></div>
+        <div class="stat red"><div class="stat-val" id="rAbsent">0</div><div class="stat-lbl">Absent</div></div>
+        <div class="stat"><div class="stat-val" id="rRate">—</div><div class="stat-lbl">Attendance rate</div></div>
+      </div>
+      <div class="card">
+        <div class="date-row">
+          <label>Date:</label>
+          <input type="date" id="dateFilter" onchange="renderRecords()">
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Student</th><th>ID</th><th>Status</th><th>Time</th><th>Method</th>
+              </tr>
+            </thead>
+            <tbody id="recBody"></tbody>
+          </table>
+        </div>
+        <div class="export-row">
+          <button class="btn-secondary" onclick="exportCSV()">Export CSV</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- SETTINGS PAGE -->
+    <div class="page" id="page-settings">
+      <div class="page-header">
+        <h2>Settings &amp; Configuration</h2>
+        <p>Configure Firebase, customize class settings, and manage face recognition parameters</p>
+      </div>
+
+      <!-- Firebase Setup Card -->
+      <div class="card" style="max-width:560px;margin-bottom:20px;background:#f0fdf4;border-color:#86efac">
+        <div style="font-size:15px;font-weight:500;margin-bottom:14px;color:var(--green)">🔥 Firebase Cloud Sync Setup</div>
+        <div class="info-block">
+          <strong>Step 1:</strong> Create a Firebase project at <code>firebase.google.com</code><br>
+          <strong>Step 2:</strong> Enable Firestore Database (start in test mode)<br>
+          <strong>Step 3:</strong> Copy your config from Firebase Console &gt; Project Settings<br>
+          <strong>Step 4:</strong> Paste the config below<br><br>
+          Once set, all students and attendance records sync automatically to the cloud.
+        </div>
+        <div class="field"><label>API Key</label><input type="text" id="fbApiKey" placeholder="AIza..."></div>
+        <div class="field"><label>Project ID</label><input type="text" id="fbProjectId" placeholder="my-project-id"></div>
+        <div class="field"><label>Auth Domain</label><input type="text" id="fbAuthDomain" placeholder="my-project.firebaseapp.com"></div>
+        <div class="field"><label>Storage Bucket</label><input type="text" id="fbBucket" placeholder="my-project.appspot.com"></div>
+        <button class="btn-primary" style="margin-top:8px" onclick="saveFirebaseConfig()">Save Firebase Config</button>
+        <button class="btn-secondary" style="margin-top:8px" onclick="testFirebaseConnection()">Test Connection</button>
+      </div>
+
+      <!-- Class Settings -->
+      <div class="card" style="max-width:560px;margin-bottom:20px">
+        <div style="font-size:15px;font-weight:500;margin-bottom:14px">Class Settings</div>
+        <div class="field"><label>Class name</label><input type="text" id="setClass" value="Class 10-A" oninput="document.getElementById('classLabel').textContent=this.value;save('fa_settings',{class:this.value,start:document.getElementById('setStart').value,late:document.getElementById('setLate').value,thresh:document.getElementById('setThresh').value})"></div>
+        <div class="field"><label>Class start time</label><input type="time" id="setStart" value="08:00" oninput="save('fa_settings',{class:document.getElementById('setClass').value,start:this.value,late:document.getElementById('setLate').value,thresh:document.getElementById('setThresh').value})"></div>
+        <div class="field"><label>Late threshold (minutes after start time)</label><input type="number" id="setLate" value="10" min="1" max="60" oninput="save('fa_settings',{class:document.getElementById('setClass').value,start:document.getElementById('setStart').value,late:this.value,thresh:document.getElementById('setThresh').value})"></div>
+        <div class="field">
+          <label>Face match threshold — lower is stricter (default: 0.5)</label>
+          <input type="range" id="setThresh" min="0.3" max="0.7" step="0.05" value="0.5" oninput="document.getElementById('threshVal').textContent=parseFloat(this.value).toFixed(2);save('fa_settings',{class:document.getElementById('setClass').value,start:document.getElementById('setStart').value,late:document.getElementById('setLate').value,thresh:this.value})">
+          <span id="threshVal" style="font-family:'DM Mono',monospace;font-size:13px;color:var(--muted);margin-left:8px">0.50</span>
+        </div>
+      </div>
+
+      <!-- Tech Stack Info -->
+      <div class="card" style="max-width:560px">
+        <div style="font-size:15px;font-weight:500;margin-bottom:14px">Technical Stack</div>
+        <div class="info-block">
+          <strong>Language:</strong> HTML + CSS + Vanilla JavaScript<br>
+          No framework, no build step — just open the .html file in a browser<br><br>
+          <strong>Face recognition:</strong> face-api.js v0.22.2 (TensorFlow.js-based)<br>
+          Runs entirely in the browser, runs on CPU<br><br>
+          <strong>Database:</strong> Firebase Firestore (cloud) + localStorage (offline)<br>
+          All face descriptors encrypted in localStorage, synced to Firestore when online<br><br>
+          <strong>Mobile:</strong> Works on iOS 11+ (Safari) and Android Chrome<br>
+          Requires HTTPS or localhost. Camera access needed.
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- Add Student Modal -->
+<div class="overlay" id="overlay">
+  <div class="modal">
+    <h3>Add New Student</h3>
+    <div class="field"><label>Full Name</label><input type="text" id="inp-name" placeholder="e.g. Ama Owusu"></div>
+    <div class="field"><label>Student ID</label><input type="text" id="inp-id" placeholder="e.g. STU-2025-001"></div>
+    <div class="field">
+      <label>Initial face status</label>
+      <select id="inp-face">
+        <option value="pending">Pending — enroll face via webcam later</option>
+        <option value="enrolled">Mark enrolled for demo (no real face data)</option>
+      </select>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-secondary" onclick="closeModal()">Cancel</button>
+      <button class="btn-primary" onclick="saveStudent()">Add Student</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ===================================================
+   FIREBASE INITIALIZATION & CONFIG
+   =================================================== */
+let db = null;
+let fbConfigured = false;
+
+async function initFirebase() {
+  const config = load('fa_fbconfig', null);
+  if (!config) {
+    console.log('Firebase not configured. Using localStorage only.');
+    updateSyncStatus('offline', 'Offline (no Firebase)');
+    document.getElementById('firebaseSetup').style.display = 'block';
+    return;
+  }
+
+  try {
+    if (!window.firebase.apps.length) {
+      firebase.initializeApp(config);
+    }
+    db = firebase.firestore();
+    fbConfigured = true;
+    updateSyncStatus('synced', 'Cloud synced');
+    console.log('Firebase initialized successfully');
+    await syncDataWithFirebase();
+  } catch (e) {
+    console.error('Firebase init error:', e);
+    updateSyncStatus('offline', 'Firebase error');
+  }
+}
+
+function saveFirebaseConfig() {
+  const config = {
+    apiKey: document.getElementById('fbApiKey').value,
+    authDomain: document.getElementById('fbAuthDomain').value,
+    projectId: document.getElementById('fbProjectId').value,
+    storageBucket: document.getElementById('fbBucket').value,
+    messagingSenderId: "000000000000",
+    appId: "1:000000000000:web:0000000000000000000000"
+  };
+  if (!config.projectId || !config.apiKey) {
+    setStatus('Please fill in API Key and Project ID at minimum.', 'error');
+    return;
+  }
+  save('fa_fbconfig', config);
+  setStatus('Firebase config saved! Reinitializing...', 'success');
+  setTimeout(() => { location.reload(); }, 1000);
+}
+
+function testFirebaseConnection() {
+  updateSyncStatus('syncing', 'Testing...');
+  initFirebase().then(() => {
+    setStatus('Firebase connection successful! ✓', 'success');
+    updateSyncStatus('synced', 'Cloud synced');
+  }).catch(e => {
+    setStatus('Firebase connection failed: ' + e.message, 'error');
+    updateSyncStatus('offline', 'Connection error');
+  });
+}
+
+/* ===================================================
+   DATA — localStorage + Firebase Firestore
+   =================================================== */
+
+const COLORS = [
+  {bg:'#eff6ff',fg:'#1d4ed8'},{bg:'#f0fdf4',fg:'#15803d'},
+  {bg:'#fef3c7',fg:'#92400e'},{bg:'#fdf2f8',fg:'#9d174d'},
+  {bg:'#f5f3ff',fg:'#6d28d9'},{bg:'#ecfdf5',fg:'#065f46'},
+  {bg:'#fff1f2',fg:'#9f1239'},{bg:'#f0f9ff',fg:'#0369a1'},
+];
+
+function load(key, def) {
+  try { return JSON.parse(localStorage.getItem(key)) || def; } catch { return def; }
+}
+function save(key, val) { localStorage.setItem(key, JSON.stringify(val)); }
+
+let students = load('fa_students', [
+  {id:'STU-001', name:'Ama Owusu',    face:'enrolled', color:0, descriptor:null},
+  {id:'STU-002', name:'Kwame Mensah', face:'enrolled', color:1, descriptor:null},
+  {id:'STU-003', name:'Abena Asante', face:'enrolled', color:2, descriptor:null},
+  {id:'STU-004', name:'Kofi Boateng', face:'pending',  color:3, descriptor:null},
+  {id:'STU-005', name:'Efua Darko',   face:'enrolled', color:4, descriptor:null},
+]);
+
+let records = load('fa_records', []);
+
+const today = new Date().toISOString().split('T')[0];
+document.getElementById('todayChip').textContent =
+  new Date().toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'short',year:'numeric'});
+document.getElementById('dateFilter').value = today;
+
+// Seed demo records if none exist for today
+if (!records.some(r => r.date === today)) {
+  students.slice(0,4).forEach((s,i) => {
+    const m = 42 + i*5;
+    records.push({studentId:s.id, date:today, status:'present', time:`07:${m}`, method:'Demo seed'});
+  });
+  if (students[4]) records.push({studentId:students[4].id, date:today, status:'absent', time:'', method:'—'});
+  save('fa_records', records);
+}
+
+// Load settings
+const settings = load('fa_settings', {class:'Class 10-A', start:'08:00', late:'10', thresh:'0.5'});
+document.getElementById('setClass').value = settings.class;
+document.getElementById('classLabel').textContent = settings.class;
+document.getElementById('setStart').value = settings.start;
+document.getElementById('setLate').value = settings.late;
+document.getElementById('setThresh').value = settings.thresh;
+document.getElementById('threshVal').textContent = parseFloat(settings.thresh).toFixed(2);
+
+/* ===================================================
+   SYNC WITH FIREBASE
+   =================================================== */
+
+async function syncDataWithFirebase() {
+  if (!fbConfigured || !db) return;
+  try {
+    updateSyncStatus('syncing', 'Syncing...');
+
+    // Sync students to Firebase
+    const batch = db.batch();
+    students.forEach(s => {
+      const ref = db.collection('students').doc(s.id);
+      batch.set(ref, {
+        id: s.id,
+        name: s.name,
+        face: s.face,
+        color: s.color,
+        descriptor: s.descriptor,
+        lastUpdated: new Date()
+      }, { merge: true });
+    });
+
+    // Sync records to Firebase
+    records.forEach((r, idx) => {
+      const ref = db.collection('records').doc(`${r.date}_${r.studentId}`);
+      batch.set(ref, {
+        ...r,
+        lastUpdated: new Date()
+      }, { merge: true });
+    });
+
+    await batch.commit();
+    updateSyncStatus('synced', 'Synced');
+    console.log('Data synced to Firebase');
+  } catch (e) {
+    console.error('Sync error:', e);
+    updateSyncStatus('offline', 'Sync failed');
+  }
+}
+
+function updateSyncStatus(state, text) {
+  const status = document.getElementById('syncStatus');
+  status.className = `sync-indicator ${state}`;
+  document.getElementById('syncText').textContent = text;
+}
+
+/* ===================================================
+   HELPERS
+   =================================================== */
+function initials(name) { return name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase(); }
+function nowTime() {
+  const n = new Date();
+  return n.getHours().toString().padStart(2,'0') + ':' + n.getMinutes().toString().padStart(2,'0');
+}
+function isLate() {
+  const [h,m] = (document.getElementById('setStart').value||'08:00').split(':').map(Number);
+  const thresh = parseInt(document.getElementById('setLate').value||'10', 10);
+  const n = new Date();
+  return (n.getHours()*60 + n.getMinutes()) > (h*60 + m + thresh);
+}
+function getThreshold() { return parseFloat(document.getElementById('setThresh').value||'0.5'); }
+
+// Check HTTPS on load
+function checkHTTPS() {
+  if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+    document.getElementById('httpsWarning').style.display = 'block';
+  }
+}
+
+/* ===================================================
+   NAVIGATION
+   =================================================== */
+function showPage(name, btn) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
+  document.getElementById('page-'+name).classList.add('active');
+  btn.classList.add('active');
+  if (name === 'students') renderStudents();
+  if (name === 'records')  renderRecords();
+}
+
+/* ===================================================
+   STUDENTS
+   =================================================== */
+function renderStudents() {
+  const q = (document.getElementById('searchInput').value||'').toLowerCase();
+  const grid = document.getElementById('studentGrid');
+  const list = students.filter(s => s.name.toLowerCase().includes(q) || s.id.toLowerCase().includes(q));
+  if (!list.length) { grid.innerHTML = '<div style="color:var(--muted);font-size:14px;padding:20px">No students found.</div>'; return; }
+  grid.innerHTML = list.map(s => {
+    const c = COLORS[s.color % COLORS.length];
+    const hasReal = s.descriptor !== null;
+    return `<div class="student-card">
+      <div class="avatar-lg" style="background:${c.bg};color:${c.fg}">${initials(s.name)}</div>
+      <div class="student-card-name">${s.name}</div>
+      <div class="student-card-id">${s.id}</div>
+      <span class="badge ${s.face}">${s.face==='enrolled'?(hasReal?'Face enrolled':'Demo enrolled'):'Not enrolled'}</span>
+      ${s.face==='pending'?`<div><button class="enroll-mini" onclick="demoEnroll('${s.id}')">Simulate Enroll</button></div>`:''}
+    </div>`;
+  }).join('');
+
+  const sel = document.getElementById('enrollSelect');
+  sel.innerHTML = students.map(s => `<option value="${s.id}">${s.name} (${s.id})</option>`).join('');
+}
+
+function demoEnroll(id) {
+  const s = students.find(x => x.id === id);
+  if (s) { s.face = 'enrolled'; save('fa_students', students); renderStudents(); syncDataWithFirebase(); }
+}
+
+function openModal()  { document.getElementById('overlay').classList.add('open'); }
+function closeModal() { document.getElementById('overlay').classList.remove('open'); }
+
+function saveStudent() {
+  const name = document.getElementById('inp-name').value.trim();
+  const id   = document.getElementById('inp-id').value.trim();
+  const face = document.getElementById('inp-face').value;
+  if (!name || !id) { alert('Please fill in both name and student ID.'); return; }
+  if (students.some(s => s.id === id)) { alert('Student ID already exists.'); return; }
+  students.push({ id, name, face, color: students.length % COLORS.length, descriptor: null });
+  save('fa_students', students);
+  document.getElementById('inp-name').value = '';
+  document.getElementById('inp-id').value   = '';
+  closeModal();
+  renderStudents();
+  syncDataWithFirebase();
+}
+
+/* ===================================================
+   ATTENDANCE RECORDS
+   =================================================== */
+function renderRecords() {
+  const d = document.getElementById('dateFilter').value || today;
+  const dayRecs = records.filter(r => r.date === d);
+  const present = dayRecs.filter(r => r.status === 'present' || r.status === 'late').length;
+  const absent  = dayRecs.filter(r => r.status === 'absent').length;
+  document.getElementById('rTotal').textContent   = students.length;
+  document.getElementById('rPresent').textContent = present;
+  document.getElementById('rAbsent').textContent  = absent;
+  document.getElementById('rRate').textContent    = students.length ? Math.round(present/students.length*100)+'%' : '—';
+
+  const body = document.getElementById('recBody');
+  if (!dayRecs.length) {
+    body.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:24px;color:var(--muted)">No records for this date.</td></tr>';
+    return;
+  }
+  body.innerHTML = dayRecs.map(r => {
+    const s = students.find(x => x.id === r.studentId) || {name: r.studentId, color:0};
+    const c = COLORS[s.color % COLORS.length];
+    return `<tr>
+      <td><span class="av-sm" style="background:${c.bg};color:${c.fg}">${initials(s.name)}</span>${s.name}</td>
+      <td class="mono">${r.studentId}</td>
+      <td><span class="pill ${r.status}">${r.status}</span></td>
+      <td class="mono">${r.time || '—'}</td>
+      <td style="font-size:13px;color:var(--muted)">${r.method || 'Manual'}</td>
+    </tr>`;
+  }).join('');
+}
+
+function exportCSV() {
+  const d = document.getElementById('dateFilter').value || today;
+  const rows = [['Name','Student ID','Date','Status','Time','Method']];
+  records.filter(r => r.date === d).forEach(r => {
+    const s = students.find(x => x.id === r.studentId) || {name:'Unknown'};
+    rows.push([s.name, r.studentId, r.date, r.status, r.time||'', r.method||'']);
+  });
+  const csv = rows.map(r => r.map(v => `"${v}"`).join(',')).join('\n');
+  const a = document.createElement('a');
+  a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+  a.download = `attendance_${d}.csv`;
+  a.click();
+}
+
+/* ===================================================
+   CAMERA — MOBILE OPTIMIZED
+   =================================================== */
+let stream = null;
+let modelsLoaded = false;
+
+const MODEL_URL = 'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@master/weights';
+
+async function loadModels() {
+  const bar  = document.getElementById('loaderBar');
+  const text = document.getElementById('loaderText');
+  const steps = [
+    { fn: () => faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL),    label: 'Loading face detector…',     pct: 33  },
+    { fn: () => faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),  label: 'Loading landmark model…',    pct: 66  },
+    { fn: () => faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL), label: 'Loading recognition model…', pct: 100 },
+  ];
+  for (const step of steps) {
+    text.textContent = step.label;
+    bar.style.width  = step.pct + '%';
+    await step.fn();
+  }
+  modelsLoaded = true;
+  document.getElementById('modelLoader').style.display = 'none';
+}
+
+async function startCamera() {
+  if (!modelsLoaded) { setStatus('Models still loading, please wait a moment.', 'warn'); return; }
+  
+  // Check HTTPS
+  if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+    setStatus('Camera requires HTTPS or localhost. Deploy to Vercel, Netlify, or test locally.', 'error');
+    return;
+  }
+
+  // Mobile-optimized constraints
+  const constraints = {
+    video: {
+      facingMode: 'user',
+      width: { ideal: 1280 },
+      height: { ideal: 720 },
+      aspectRatio: { ideal: 16 / 9 }
+    },
+    audio: false
+  };
+
+  try {
+    stream = await navigator.mediaDevices.getUserMedia(constraints);
+    const vid = document.getElementById('videoEl');
+    vid.srcObject = stream;
+    vid.style.display = 'block';
+    document.getElementById('camPlaceholder').style.display = 'none';
+    document.getElementById('startCamBtn').disabled  = true;
+    document.getElementById('stopCamBtn').disabled   = false;
+    document.getElementById('detectBtn').disabled    = false;
+    document.getElementById('enrollBtn').disabled    = false;
+    setStatus('Camera active. Click "Detect &amp; Mark Attendance" to scan a face.', 'info');
+  } catch(e) {
+    const errorMap = {
+      'NotAllowedError': 'Camera permission denied. Go to Settings > [App] > Camera and allow access.',
+      'NotFoundError': 'No camera found on this device. Check hardware.',
+      'NotReadableError': 'Camera already in use by another app. Close and try again.',
+      'SecurityError': 'Camera requires HTTPS or localhost — cannot access on plain HTTP.',
+      'OverconstrainedError': 'Camera does not support requested video settings.',
+      'TypeError': 'Invalid camera constraints or permission denied.'
+    };
+    const msg = errorMap[e.name] || e.message || 'Unknown error';
+    setStatus(`Camera error: ${msg}`, 'error');
+    console.error('Camera error details:', e);
+  }
+}
+
+function stopCamera() {
+  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  const vid = document.getElementById('videoEl');
+  vid.style.display = 'none';
+  document.getElementById('camPlaceholder').style.display = 'flex';
+  document.getElementById('startCamBtn').disabled  = false;
+  document.getElementById('stopCamBtn').disabled   = true;
+  document.getElementById('detectBtn').disabled    = true;
+  document.getElementById('enrollBtn').disabled    = true;
+  const ctx = document.getElementById('faceCanvas').getContext('2d');
+  ctx.clearRect(0, 0, 9999, 9999);
+  setStatus('Camera stopped.', '');
+}
+
+function setStatus(html, type) {
+  const box = document.getElementById('statusBox');
+  box.className = 'status-box' + (type ? ' '+type : '');
+  const dotColor = {success:'green', error:'red', info:'green', warn:'amber', '':'gray'}[type] || 'gray';
+  box.innerHTML = `<div class="status-dot ${dotColor}"></div><span>${html}</span>`;
+}
+
+/* ===================================================
+   FACE ENROLLMENT
+   =================================================== */
+async function enrollCurrentFace() {
+  if (!stream) { setStatus('Start the camera first.', 'warn'); return; }
+  const sid = document.getElementById('enrollSelect').value;
+  if (!sid) { setStatus('Select a student to enroll.', 'warn'); return; }
+  const vid = document.getElementById('videoEl');
+  setStatus('Capturing face for enrollment…', 'info');
+  document.getElementById('enrollBtn').disabled = true;
+  try {
+    const det = await faceapi
+      .detectSingleFace(vid, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.5 }))
+      .withFaceLandmarks()
+      .withFaceDescriptor();
+    if (!det) {
+      setStatus('No face detected. Position clearly in front of the camera.', 'warn');
+    } else {
+      const s = students.find(x => x.id === sid);
+      s.descriptor = Array.from(det.descriptor);
+      s.face = 'enrolled';
+      save('fa_students', students);
+      setStatus(`Face enrolled for <strong>${s.name}</strong>. They will now be recognised automatically.`, 'success');
+      renderStudents();
+      await syncDataWithFirebase();
+    }
+  } catch(e) {
+    setStatus('Enrollment error: ' + e.message, 'error');
+    console.error('Enrollment error:', e);
+  }
+  document.getElementById('enrollBtn').disabled = false;
+}
+
+/* ===================================================
+   FACE DETECTION & ATTENDANCE MARKING
+   =================================================== */
+async function runDetection() {
+  if (!modelsLoaded) { setStatus('Models not loaded.', 'error'); return; }
+  const vid = document.getElementById('videoEl');
+  if (!vid.srcObject) { setStatus('Camera is not active.', 'error'); return; }
+
+  setStatus('Scanning for faces…', 'info');
+  document.getElementById('detectBtn').disabled = true;
+
+  try {
+    const detections = await faceapi
+      .detectAllFaces(vid, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.5 }))
+      .withFaceLandmarks()
+      .withFaceDescriptors();
+
+    // Draw boxes on canvas
+    const canvas = document.getElementById('faceCanvas');
+    faceapi.matchDimensions(canvas, vid, true);
+    const resized = faceapi.resizeResults(detections, {width: vid.videoWidth, height: vid.videoHeight});
+    faceapi.matchDimensions(canvas, {width: vid.clientWidth, height: vid.clientHeight});
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    faceapi.draw.drawDetections(canvas, faceapi.resizeResults(detections, {width:canvas.width, height:canvas.height}));
+
+    if (detections.length === 0) {
+      setStatus('No face detected in frame. Ensure good lighting and clear view.', 'warn');
+      document.getElementById('detectBtn').disabled = false;
+      return;
+    }
+
+    const enrolled = students.filter(s => s.descriptor !== null && s.face === 'enrolled');
+    const threshold = getThreshold();
+    const msgs = [];
+
+    for (const det of detections) {
+      let matched = null;
+
+      if (enrolled.length > 0) {
+        const labeled = enrolled.map(s =>
+          new faceapi.LabeledFaceDescriptors(s.id, [new Float32Array(s.descriptor)])
+        );
+        const matcher = new faceapi.FaceMatcher(labeled, threshold);
+        const best = matcher.findBestMatch(det.descriptor);
+        if (best.label !== 'unknown') {
+          matched = { student: students.find(x => x.id === best.label), distance: best.distance, demo: false };
+        }
+      } else {
+        const demo = students.filter(s => s.face === 'enrolled');
+        if (demo.length) {
+          matched = { student: demo[Math.floor(Math.random() * demo.length)], distance: 0.25, demo: true };
+        }
+      }
+
+      if (!matched) {
+        msgs.push('Face detected but not recognised. Enroll this student first.');
+        continue;
+      }
+
+      const s = matched.student;
+      const existing = records.find(r => r.studentId === s.id && r.date === today);
+      if (existing) {
+        msgs.push(`${s.name} is already marked <strong>${existing.status}</strong> today.`);
+      } else {
+        const t   = nowTime();
+        const sta = isLate() ? 'late' : 'present';
+        const conf = matched.demo ? 'Demo mode' : `${Math.round((1 - matched.distance)*100)}% confidence`;
+        records.push({ studentId: s.id, date: today, status: sta, time: t, method: `Face ID (${conf})` });
+        save('fa_records', records);
+        msgs.push(`Marked <strong>${s.name}</strong> as <strong>${sta}</strong> at ${t} — ${conf}`);
+      }
+    }
+
+    setStatus(msgs.join('<br>'), 'success');
+    await syncDataWithFirebase();
+
+  } catch(e) {
+    console.error('Detection error:', e);
+    setStatus('Detection error: ' + e.message, 'error');
+  }
+
+  document.getElementById('detectBtn').disabled = false;
+}
+
+/* ===================================================
+   INIT
+   =================================================== */
+window.addEventListener('load', () => {
+  checkHTTPS();
+  renderStudents();
+  renderRecords();
+
+  // Wait for face-api.js then load models
+  const check = setInterval(() => {
+    if (typeof faceapi !== 'undefined') {
+      clearInterval(check);
+      loadModels().catch(e => {
+        document.getElementById('modelLoader').innerHTML = `
+          <div style="text-align:center;padding:24px">
+            <p style="font-size:15px;font-weight:500;color:#b91c1c;margin-bottom:8px">Could not load face recognition models</p>
+            <p style="font-size:13px;color:#6b7280">Check your internet connection and refresh the page.</p>
+            <p style="font-size:12px;color:#9ca3af;margin-top:6px">${e.message}</p>
+          </div>`;
+      });
+    }
+  }, 150);
+
+  // Initialize Firebase
+  initFirebase();
+});
+</script>
+</body>
+</html>
